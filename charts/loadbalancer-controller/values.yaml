@@ -85,4 +85,3 @@ keepalivedGrpc:
 
   # hostPath for keepalived config directory
   keepalivedConfigPath: /etc/keepalived
-
