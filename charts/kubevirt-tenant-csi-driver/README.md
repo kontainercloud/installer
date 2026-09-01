@@ -1,6 +1,6 @@
 # KubeVirt tenant CSI driver
 
-[KubeVirt tenant CSI driver by AppsCode](https://github.com/kube-virt/csi-driver) - A Helm chart for KubeVirt tenant CSI driver
+[KubeVirt tenant CSI driver by AppsCode](https://github.com/kontainercloud/csi-driver) - A Helm chart for KubeVirt tenant CSI driver
 
 ## TL;DR;
 
