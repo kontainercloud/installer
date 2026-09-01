@@ -23,9 +23,21 @@ spec:
           imagePullPolicy: {{ .Values.loadbalancerController.image.pullPolicy }}
           ports:
             - containerPort: 50052
+            {{- if .Values.metrics.enabled }}
+            # Named so the collector discovers it by port name, not by number.
+            - name: metrics
+              containerPort: 8443
+            {{- end }}
           command:
             - /manager
             - --leader-elect=true
+            {{- if .Values.metrics.enabled }}
+            # Defaults to "0", which disables the endpoint entirely. Served over
+            # HTTPS with Kubernetes authn/authz, so only a token the apiserver
+            # accepts can scrape it.
+            - --metrics-bind-address=:8443
+            - --metrics-secure=true
+            {{- end }}
           envFrom:
             - secretRef:
                 name: openstack-creds

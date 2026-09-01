@@ -34,6 +34,13 @@ spec:
             privileged: true
           ports:
             - containerPort: 50051
+            {{- if .Values.metrics.enabled }}
+            # hostNetwork, so this is the NODE's port. The agent binds it to the
+            # node IP rather than 0.0.0.0, precisely so a tenant load balancer
+            # can still use port 9101 on its own VIP.
+            - name: metrics
+              containerPort: 9101
+            {{- end }}
           volumeMounts:
             - name: keepalived-config
               mountPath: /etc/keepalived

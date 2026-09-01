@@ -1,0 +1,301 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metrics-collector-config
+  namespace: {{ .Release.Namespace }}
+data:
+  collector.yaml: |
+    receivers:
+      # The prometheus receiver takes standard scrape_configs, relabeling
+      # included, so this is an ordinary Prometheus scrape job — nothing about
+      # the collection is OpenTelemetry-specific.
+      prometheus:
+        config:
+          global:
+            scrape_interval: {{ .Values.metrics.scrapeInterval }}
+            external_labels:
+              # region  the OpenStack region. Same in every datacenter of that
+              #         region, so a region rolls up by ignoring `cluster`.
+              # cluster the datacenter. Unique per load balancer cluster.
+              region: {{ required "metrics.region is required when metrics.enabled is true" .Values.metrics.region }}
+              cluster: {{ required "metrics.clusterName is required when metrics.enabled is true, and must be unique per load balancer cluster" .Values.metrics.clusterName }}
+              source: loadbalancer
+
+          scrape_configs:
+            # ── Envoy data plane: the traffic numbers ────────────────────────
+            - job_name: envoy
+              metrics_path: /stats/prometheus
+              kubernetes_sd_configs:
+                - role: pod
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+                  regex: envoy
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_container_port_name]
+                  regex: metrics
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_phase]
+                  regex: Running
+                  action: keep
+                # The namespace IS the VPC id in this design.
+                - source_labels: [__meta_kubernetes_namespace]
+                  target_label: vpc_id
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: pod
+                - source_labels: [__meta_kubernetes_pod_node_name]
+                  target_label: node
+              metric_relabel_configs:
+                # Keep only what answers load / latency / bandwidth / health.
+                # Envoy emits ~3400 series per proxy; unfiltered that multiplies
+                # by proxy count and swamps the remote store.
+                - source_labels: [__name__]
+                  action: keep
+                  regex: "envoy_cluster_upstream_cx_(total|active|rx_bytes_total|tx_bytes_total|connect_fail|connect_timeout|destroy.*)|envoy_cluster_upstream_cx_(connect_ms|length_ms)_(bucket|sum|count)|envoy_cluster_(membership_healthy|membership_total|membership_degraded)|envoy_cluster_health_check_(attempt|success|failure|network_failure|passive_failure)|envoy_cluster_upstream_rq_(total|completed|retry|pending_overflow|timeout|rx_reset|tx_reset|xx)|envoy_cluster_upstream_rq_time_(bucket|sum|count)|envoy_cluster_circuit_breakers_(cx|rq|rq_pending)_open|envoy_listener_downstream_cx_(total|active|destroy|overflow|overload_reject)|envoy_listener_downstream_(global_cx_overflow|pre_cx_timeout)|envoy_server_(uptime|live|memory_allocated|total_connections)"
+                # Turn the opaque Envoy cluster name into real dimensions.
+                #   tcproute/<vpc>/<lb-id>-tcp-<port>/rule/-1
+                # $$1 is an escaped $1: the collector expands $ in its config,
+                # so a bare $1 would be read as a variable reference.
+                - source_labels: [envoy_cluster_name]
+                  regex: "(?:tcp|http|udp)route/[^/]+/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-(?:tcp|http|udp)-[0-9]+/rule/.*"
+                  target_label: lb_id
+                  replacement: "$$1"
+                - source_labels: [envoy_cluster_name]
+                  regex: "(?:tcp|http|udp)route/[^/]+/[0-9a-f-]{36}-(?:tcp|http|udp)-([0-9]+)/rule/.*"
+                  target_label: lb_port
+                  replacement: "$$1"
+                - source_labels: [envoy_cluster_name]
+                  regex: "(tcp|http|udp)route/.*"
+                  target_label: lb_proto
+                  replacement: "$$1"
+                # Drop cluster series that are not a load balancer: Envoy's own
+                # prometheus_stats, xds_cluster and the Envoy Gateway control
+                # plane cluster carry no lb_id, and without this they land in
+                # every `sum by (lb_id)` as an unlabelled bucket that outweighs
+                # the real load balancers. envoy_server_* has no cluster name
+                # and is kept.
+                - source_labels: [__name__, lb_id]
+                  separator: ";"
+                  regex: "envoy_cluster_.*;"
+                  action: drop
+                # The raw name has served its purpose and is high-cardinality
+                # noise.
+                - regex: envoy_cluster_name
+                  action: labeldrop
+
+                # Response codes come from envoy_cluster_upstream_rq_xx, not the
+                # downstream equivalent. Both exist, but only the cluster-scoped
+                # one carries envoy_cluster_name, so only it can be attributed to
+                # a load balancer - the downstream metric is keyed by
+                # envoy_http_conn_manager_prefix, which is an Envoy Gateway
+                # internal port like "http-18074". The generic empty-lb_id drop
+                # below removes Envoy's own prometheus_stats and xds_cluster
+                # entries, so no extra rule is needed here.
+
+                # ── Listener (client-facing) metrics ─────────────────────────
+                # envoy_listener_* carries no cluster name, so none of the rules
+                # above touch it. Its own label is the socket it binds:
+                #   10.0.0.20_80   a real load balancer listener, VIP_port
+                #   0.0.0.0_10080  Envoy's placeholder listener
+                #   0.0.0.0_19001  Envoy's metrics port
+                #   0.0.0.0_19003  Envoy's readiness port
+                # Without the split below these series cannot be attributed to
+                # anything and collapse into one unusable number per proxy.
+                #
+                # Drop Envoy's three internal listeners first — they are bound
+                # on 0.0.0.0 and are not tenant traffic.
+                - source_labels: [__name__, envoy_listener_address]
+                  separator: ";"
+                  regex: "envoy_listener_.*;0\\.0\\.0\\.0_.*"
+                  action: drop
+                # VIP and port become real dimensions. lb_port is deliberately
+                # the same label the cluster metrics use, so a query can group
+                # both sides of the proxy by listener port.
+                - source_labels: [envoy_listener_address]
+                  regex: "([0-9.]+)_[0-9]+"
+                  target_label: lb_vip
+                  replacement: "$$1"
+                - source_labels: [envoy_listener_address]
+                  regex: "[0-9.]+_([0-9]+)"
+                  target_label: lb_port
+                  replacement: "$$1"
+                - regex: envoy_listener_address
+                  action: labeldrop
+
+            # ── Load balancer controller: state, identity, provisioning ──────
+            # Answers the question Envoy cannot: is this load balancer UP.
+            # Served over HTTPS with Kubernetes authn/authz, so it needs the
+            # pod's service-account token; the certificate is the self-signed
+            # one controller-runtime generates, hence skip_verify.
+            #
+            # Both replicas export the same claim-derived series, distinguished
+            # by the pod label. Aggregate with `max by (lb_id)`. Do NOT drop the
+            # pod label to dedupe - two targets emitting an identical series is
+            # a duplicate-sample scrape error, not a merge.
+            - job_name: loadbalancer-controller
+              scheme: https
+              tls_config:
+                insecure_skip_verify: true
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names: [{{ .Release.Namespace }}]
+              relabel_configs:
+                # The keepalived agents live in this same namespace and also
+                # expose a port named "metrics", so filtering on the port name
+                # alone matches them too - and they serve plain HTTP, which this
+                # HTTPS job cannot read. Pin to the controller by label.
+                - source_labels: [__meta_kubernetes_pod_label_app]
+                  regex: loadbalancer-controller
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_container_port_name]
+                  regex: metrics
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_phase]
+                  regex: Running
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: pod
+                # Deliberately NO `node` target label here. loadbalancer_master_node
+                # carries its own `node` - the node holding the VIP - and a target
+                # label of the same name wins the collision, pushing the real value
+                # out to `exported_node`. That silently reported every load balancer
+                # as mastered by whichever node the controller pod happened to run
+                # on. `pod` is the only distinguisher this job needs.
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: "loadbalancer_.+"
+
+            # ── Keepalived node agents: is the data path actually up ─────────
+            # Plain HTTP on the host network, bound to the node IP. The same
+            # pod-role discovery works because the container port is named
+            # "metrics".
+            - job_name: keepalived-agent
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces:
+                    names: [{{ .Release.Namespace }}]
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_app]
+                  regex: keepalived-grpc
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_container_port_name]
+                  regex: metrics
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_phase]
+                  regex: Running
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: pod
+                # Same reason as above: every keepalived_* series already carries
+                # the node it describes. Here the two values agree, so the only
+                # damage was a duplicate `exported_node` on every series.
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: "keepalived_.+"
+
+            # ── The collector watching itself ────────────────────────────────
+            # Without this a stalled export queue is invisible: the Envoy series
+            # simply stop, with nothing to say why.
+            - job_name: metrics-collector
+              static_configs:
+                - targets: [127.0.0.1:8888]
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: "otelcol_(exporter|receiver|processor)_.+"
+
+    processors:
+      # A burst of new series — a large batch of load balancers, or a mistaken
+      # relabel rule — must not turn into unbounded memory growth.
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+      # One remote-write request per batch rather than one per scrape.
+      batch:
+        timeout: 10s
+        send_batch_size: 2000
+
+    exporters:
+      prometheusremotewrite:
+        endpoint: ${env:THANOS_ENDPOINT}
+        headers:
+          THANOS-TENANT: ${env:THANOS_TENANT}
+        tls:
+          insecure: {{ .Values.metrics.thanos.insecure }}
+          {{- with .Values.metrics.thanos.caFile }}
+          ca_file: {{ . }}
+          {{- end }}
+        {{- with .Values.metrics.thanos.bearerTokenFile }}
+        auth:
+          authenticator: bearertokenauth
+        {{- end }}
+        # Defaults to true, which appends OpenTelemetry unit and type suffixes
+        # and so silently renames every series. Every existing query breaks.
+        add_metric_suffixes: false
+        # target_info is synthesized by this exporter from resource attributes,
+        # and external_labels are NOT applied to it - it carries no region and
+        # no cluster. Two datacenters therefore emit byte-identical target_info
+        # series, and the second writer is rejected with "409 Conflict: out of
+        # order sample" (measured with two collectors in one region). Nothing
+        # here reads it, because resource_to_telemetry_conversion is off and
+        # every label worth having is already on the series.
+        target_info:
+          enabled: false
+        # Must stay false. Turning it on promotes every resource attribute to a
+        # label — k8s_pod_uid, service_instance_id, net_host_port, http_scheme
+        # and more — producing a second, polluted copy of every series. job and
+        # instance arrive without it.
+        resource_to_telemetry_conversion:
+          enabled: false
+        # Generous enough that a slow-but-alive remote is not mistaken for a
+        # dead one. The default is 5s, and a timeout is classified as a
+        # *permanent* error by this exporter, so a remote that merely responds
+        # slowly loses data outright rather than being retried.
+        timeout: 30s
+        # In-memory only. This exporter has no persistent queue — `sending_queue`
+        # with a file_storage backend is rejected as an invalid key — so there is
+        # no WAL equivalent here. Measured behaviour when the remote is down:
+        # the export fails with "Permanent error: context deadline exceeded",
+        # retry_on_failure never engages, and the batch is dropped. Metrics have
+        # a hole for the length of the outage and backfill nothing afterwards.
+        # If gap-free delivery is ever required, that needs a shipper with a WAL
+        # in front of this, not a larger queue.
+        remote_write_queue:
+          enabled: true
+          queue_size: 10000
+          num_consumers: 5
+        # Covers the errors that *are* classified retryable (5xx, refused
+        # connections). It does not cover the timeout case described above.
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+
+    {{- with .Values.metrics.thanos.bearerTokenFile }}
+    extensions:
+      bearertokenauth:
+        filename: {{ . }}
+    {{- end }}
+
+    service:
+      {{- with .Values.metrics.thanos.bearerTokenFile }}
+      extensions: [bearertokenauth]
+      {{- end }}
+      telemetry:
+        metrics:
+          level: basic
+          # The default is localhost:8888, which puts these counters out of
+          # reach of the self-scrape job above.
+          address: 0.0.0.0:8888
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          processors: [memory_limiter, batch]
+          exporters: [prometheusremotewrite]
+{{- end }}

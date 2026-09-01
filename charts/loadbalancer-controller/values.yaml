@@ -86,3 +86,72 @@ keepalivedGrpc:
   # hostPath for keepalived config directory
   keepalivedConfigPath: /etc/keepalived
 
+
+# -------------------------------------------------------------------
+# metrics: an OpenTelemetry Collector that scrapes every Envoy proxy in
+# the cluster and pushes the per-load-balancer traffic numbers — load,
+# bandwidth, latency, backend health — to a Thanos that normally lives
+# on a different cluster.
+#
+# thanos.endpoint is required when enabled; it reaches the collector as
+# the THANOS_ENDPOINT environment variable.
+# -------------------------------------------------------------------
+metrics:
+  enabled: false
+
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.116.1"
+    pullPolicy: IfNotPresent
+
+  serviceAccountName: metrics-collector
+
+  thanos:
+    # Full remote-write URL of the Thanos Receive on the monitoring
+    # cluster, e.g. https://thanos.example.com/api/v1/receive
+    endpoint: ""
+    # Thanos Receive's tenant header is THANOS-TENANT (X-Scope-OrgID is the
+    # Cortex/Mimir convention and is ignored). Defaults to metrics.region, so
+    # every datacenter in a region writes into one tenant.
+    #
+    # That default is deliberate. Thanos Receive gives each tenant its own
+    # store, and two writers in one tenant that also share a `cluster` label
+    # collide loudly with "409 Conflict: out of order sample". Splitting the
+    # tenant per datacenter would hide exactly that misconfiguration and leave
+    # you silently double-counting instead.
+    tenant: ""
+    # Set false once the remote serves a real certificate; pair with
+    # caFile if it is signed by a private CA.
+    insecure: true
+    caFile: ""
+    # File holding a bearer token to send as Authorization. Mount it
+    # yourself via metrics.extraVolumes / extraVolumeMounts.
+    bearerTokenFile: ""
+
+  # REQUIRED. The region this load balancer cluster belongs to - one OpenStack,
+  # several datacenters. Every cluster in the same region uses the SAME value,
+  # which is what lets a region be rolled up as one number.
+  region: ""
+
+  # REQUIRED, and it MUST be different in every load balancer cluster that
+  # pushes to the same Thanos - one value per datacenter.
+  #
+  # It is stamped on every series as the `cluster` label. Two clusters sharing
+  # a value produce byte-identical series, and Thanos Receive rejects the
+  # second writer with "409 Conflict: out of order sample" - measured. If the
+  # tenants happen to differ the write succeeds instead, which is worse: both
+  # datacenters land under one `cluster` name and every query that groups by
+  # it silently double-counts.
+  clusterName: ""
+
+  scrapeInterval: 15s
+
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      memory: 1Gi

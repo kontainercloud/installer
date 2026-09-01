@@ -1,0 +1,107 @@
+{{- if .Values.metrics.enabled }}
+{{- $thanosEndpoint := required "metrics.thanos.endpoint is required when metrics.enabled is true — the collector has nowhere to push otherwise" .Values.metrics.thanos.endpoint }}
+{{- $region := required "metrics.region is required when metrics.enabled is true - every load balancer cluster in the same region shares this value" .Values.metrics.region }}
+{{- $cluster := required "metrics.clusterName is required when metrics.enabled is true, and must be unique per load balancer cluster - two clusters sharing it corrupt the data at the remote" .Values.metrics.clusterName }}
+{{- $tenant := default $region .Values.metrics.thanos.tenant }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.metrics.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metrics-collector-role
+rules:
+  # Pod discovery has to be cluster-wide: each VPC gets its own namespace,
+  # created and destroyed with the VPC, so the Envoy targets cannot be pinned
+  # to a fixed list of namespaces.
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints", "nodes"]
+    verbs: ["get", "list", "watch"]
+  # The controller's metrics endpoint authorizes the scraper against this
+  # non-resource URL. Pod discovery alone is not enough to read it.
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metrics-collector-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: metrics-collector-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.metrics.serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: metrics-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-collector
+  template:
+    metadata:
+      labels:
+        app: metrics-collector
+      annotations:
+        # The collector does not watch its ConfigMap, so a config change has to
+        # roll the pod. Hashing the rendered ConfigMap catches edits to the
+        # scrape config itself, which hashing .Values.metrics alone would miss.
+        checksum/config: {{ include (print $.Template.BasePath "/metrics-collector-config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Values.metrics.serviceAccountName }}
+      containers:
+        - name: collector
+          # contrib, not core: the prometheus receiver and the
+          # prometheusremotewrite exporter ship only in the contrib build.
+          image: "{{ .Values.metrics.image.repository }}:{{ .Values.metrics.image.tag }}"
+          imagePullPolicy: {{ .Values.metrics.image.pullPolicy }}
+          args: ["--config=/etc/otel/collector.yaml"]
+          env:
+            - name: THANOS_ENDPOINT
+              value: {{ $thanosEndpoint | quote }}
+            - name: THANOS_TENANT
+              value: {{ $tenant | quote }}
+          ports:
+            - name: telemetry
+              containerPort: 8888
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otel
+            {{- with .Values.metrics.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.metrics.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: metrics-collector-config
+        {{- with .Values.metrics.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-collector
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: metrics-collector
+  ports:
+    - name: telemetry
+      port: 8888
+      targetPort: 8888
+{{- end }}

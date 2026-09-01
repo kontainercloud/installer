@@ -9,6 +9,19 @@ kind: ClusterRole
 metadata:
   name: loadbalancer-controller-role
 rules:
+{{- if .Values.metrics.enabled }}
+  # ── Metrics endpoint authn/authz ──────────────────────────────
+  # The manager serves /metrics over HTTPS behind
+  # filters.WithAuthenticationAndAuthorization, which verifies the scraper's
+  # bearer token against the apiserver. Without these two the endpoint answers
+  # every scrape with 401.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["subjectaccessreviews"]
+    verbs: ["create"]
+{{- end }}
   # ── LoadBalancerClaim ─────────────────────────────────────────
   - apiGroups: ["networking.appscode.com"]
     resources: ["loadbalancerclaims"]
