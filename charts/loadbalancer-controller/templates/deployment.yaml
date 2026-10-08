@@ -34,6 +34,8 @@ spec:
           env:
             - name: MODE
               value: {{ .Values.mode | quote }}
+            - name: DATACENTER_UUID
+              value: {{ required "loadbalancerController.env.datacenterUuid is required: the uuid of the datacenter this controller serves" .Values.loadbalancerController.env.datacenterUuid | quote }}
             {{- if eq .Values.mode "openstack"}}
             - name: OS_TENANT_ID
               value: {{ .Values.loadbalancerController.env.osTenantId | quote }}

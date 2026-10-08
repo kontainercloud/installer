@@ -26,6 +26,11 @@ loadbalancerController:
   serviceAccountName: loadbalancer-controller
 
   env:
+    # UUID of the datacenter this controller serves. REQUIRED. The load balancer
+    # API and its database are shared by every datacenter; each datacenter runs
+    # its own controller, which only builds load balancers created with this same
+    # datacenter_uuid.
+    datacenterUuid: ""
     osTenantId: ""
     osNetworkId: ""
     osSubnetId: ""
