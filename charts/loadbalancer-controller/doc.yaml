@@ -1,7 +1,7 @@
 project:
   name: LoadBalancer Controller by AppsCode
   shortName: LoadBalancer Controller
-  url: https://github.com/kube-virt/installer
+  url: https://github.com/kontainercloud/installer
   description: A Helm chart for the LoadBalancer Controller (loadbalancer-controller + keepalived-grpc)
   app: a LoadBalancer controller
 repository:

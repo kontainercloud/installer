@@ -20,8 +20,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kubevirt/installer/apis/installer/v1alpha1"
-
+	"github.com/kontainercloud/installer/apis/installer/v1alpha1"
 	sc "kmodules.xyz/schema-checker"
 )
 

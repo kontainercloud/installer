@@ -47,7 +47,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        k8s: [v1.29.14, v1.31.14, v1.33.7, v1.35.0]
+        k8s: [v1.31.14, v1.33.7, v1.35.0]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
