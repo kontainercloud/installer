@@ -34,15 +34,13 @@ spec:
           env:
             - name: MODE
               value: {{ .Values.mode | quote }}
-            - name: DATACENTER_UUID
-              value: {{ required "loadbalancerController.env.datacenterUuid is required: the uuid of the datacenter this controller serves" .Values.loadbalancerController.env.datacenterUuid | quote }}
             {{- if eq .Values.mode "openstack"}}
             - name: OS_TENANT_ID
               value: {{ .Values.loadbalancerController.env.osTenantId | quote }}
             - name: OS_NETWORK_ID
-              value: {{ .Values.loadbalancerController.env.osNetworkId | quote }}
+              value: {{ required "loadbalancerController.env.osNetworkId is required when mode=openstack: the network that holds the trunk parent ports" .Values.loadbalancerController.env.osNetworkId | quote }}
             - name: OS_SUBNET_ID
-              value: {{ .Values.loadbalancerController.env.osSubnetId | quote }}
+              value: {{ required "loadbalancerController.env.osSubnetId is required when mode=openstack: the subnet of osNetworkId that trunk parent ports are created on" .Values.loadbalancerController.env.osSubnetId | quote }}
             {{- end }}
             - name: CLUSTER_NAMESPACE
               value: {{ .Values.loadbalancerController.env.clusterNamespace | quote }}

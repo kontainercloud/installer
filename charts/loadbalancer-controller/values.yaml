@@ -26,11 +26,12 @@ loadbalancerController:
   serviceAccountName: loadbalancer-controller
 
   env:
-    # UUID of the datacenter this controller serves. REQUIRED. The load balancer
-    # API and its database are shared by every datacenter; each datacenter runs
-    # its own controller, which only builds load balancers created with this same
-    # datacenter_uuid.
-    datacenterUuid: ""
+    # mode=openstack only. Each node gets an extra "trunk parent" port, created
+    # here and hot-attached to the node's Nova server; the node's own port is not
+    # used. Use a dedicated network/subnet for it, separate from the load balancer
+    # networks. osNetworkId and osSubnetId are REQUIRED in openstack mode
+    # (osSubnetId must belong to osNetworkId); osTenantId is the project the ports
+    # are created in. Ignored in harvester mode.
     osTenantId: ""
     osNetworkId: ""
     osSubnetId: ""
