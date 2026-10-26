@@ -1,4 +1,4 @@
-module github.com/kubevirt/installer
+module github.com/kontainercloud/installer
 
 go 1.25.0
 
