@@ -20,7 +20,7 @@ loadbalancerController:
 
   image:
     repository: ghcr.io/kontainercloud/loadbalancer-controller
-    tag: v0.1.0-ac
+    tag: v0.2.0-ac
     pullPolicy: IfNotPresent
 
   serviceAccountName: loadbalancer-controller
@@ -78,7 +78,7 @@ keepalivedGrpc:
 
   image:
     repository: ghcr.io/kontainercloud/keepalived
-    tag: v0.1.0-ac
+    tag: v0.2.0-ac
     pullPolicy: IfNotPresent
 
   hostNetwork: true
