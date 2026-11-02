@@ -50,7 +50,8 @@ type LoadbalancerControllerSpec struct {
 	FullnameOverride string `json:"fullnameOverride"`
 
 	// Mode is either "openstack" or "harvester". In harvester mode, a kubeconfig
-	// secret is mounted; openstack-creds are NOT used.
+	// secret is mounted. openstack-creds are needed in both modes: the controller
+	// always manages Neutron ports and trunks.
 	Mode string `json:"mode"`
 
 	LoadbalancerController LoadbalancerControllerDeploymentSpec `json:"loadbalancerController"`
@@ -87,7 +88,8 @@ type LoadbalancerControllerEnv struct {
 	ClusterNamespace string `json:"clusterNamespace"`
 }
 
-// OpenstackCredsSpec is the schema for the openstack-creds Secret (used only when mode=openstack).
+// OpenstackCredsSpec is the schema for the openstack-creds Secret (used in both modes).
+// OsAuthUrl, OsPassword and OsProjectId are required; the chart fails to render without them.
 type OpenstackCredsSpec struct {
 	//+optional
 	OsAuthUrl  string `json:"osAuthUrl"`
