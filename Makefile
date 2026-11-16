@@ -329,6 +329,8 @@ unit-tests: $(BUILD_DIRS)
 CT_COMMAND     ?= lint-and-install
 TEST_CHARTS    ?=
 KUBE_NAMESPACE ?=
+# Extra ct flags for a single chart, e.g. --helm-extra-set-args for required values.
+CT_EXTRA_ARGS  ?=
 
 ifeq ($(strip $(TEST_CHARTS)),)
 	CT_ARGS = --all $(ct_namespace)
@@ -365,7 +367,7 @@ ct: $(BUILD_DIRS)
 	      kubectl apply --validate=false -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml; \
 	      kubectl wait --for=condition=Ready pods -n cert-manager --all --timeout=5m; \
 	      ./hack/scripts/update-chart-dependencies.sh; \
-	      ct $(CT_COMMAND) --debug --validate-maintainers=false $(CT_ARGS) \
+	      ct $(CT_COMMAND) --debug --validate-maintainers=false $(CT_ARGS) $(CT_EXTRA_ARGS) \
 	    "
 
 .PHONY: lint

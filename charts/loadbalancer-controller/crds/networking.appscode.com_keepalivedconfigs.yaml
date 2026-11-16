@@ -15,21 +15,12 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.nodeName
-      name: Node
-      type: string
-    - jsonPath: .spec.virtualIp
-      name: VIP
-      type: string
-    - jsonPath: .spec.interfaceName
-      name: Iface
-      type: string
     - jsonPath: .spec.state
       name: State
       type: string
-    - jsonPath: .status.phase
-      name: Phase
-      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
