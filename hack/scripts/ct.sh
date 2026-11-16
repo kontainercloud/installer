@@ -29,7 +29,14 @@ for dir in charts/*/; do
         ns=app-$(date +%s | head -c 6)
         kubectl create ns $ns
         # kubectl label ns $ns pod-security.kubernetes.io/enforce=restricted
-        make ct TEST_CHARTS=charts/$dir KUBE_NAMESPACE=$ns
+        extra=""
+        if [[ "$dir" = "loadbalancer-controller" ]]; then
+            # The chart requires OpenStack credentials in every mode. Placeholders are
+            # enough for the install test: the controller only authenticates when it
+            # reconciles a load balancer, which never happens here.
+            extra="--helm-extra-set-args='--set=openstackCreds.osAuthUrl=http://keystone.ci.invalid:5000/v3 --set=openstackCreds.osPassword=ci-placeholder --set=openstackCreds.osProjectId=ci-placeholder'"
+        fi
+        make ct TEST_CHARTS=charts/$dir KUBE_NAMESPACE=$ns CT_EXTRA_ARGS="$extra"
         kubectl delete ns $ns || true
     fi
 done

@@ -14,7 +14,20 @@ spec:
     singular: loadbalancerclaim
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.ready
+      name: State
+      type: boolean
+    - jsonPath: .status.loadBalancerIP
+      name: IP
+      type: string
+    - jsonPath: .status.trunkPortClaims[?(@.isMaster==true)].name
+      name: MasterNode
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: LoadBalancerClaim is the Schema for the loadbalancerclaims API
@@ -339,6 +352,9 @@ spec:
               qosPolicyID:
                 type: string
               ready:
+                description: |-
+                  Ready is always serialized, so the State printer column shows false
+                  instead of an empty cell while the load balancer is not ready.
                 type: boolean
               securityGroupDisabled:
                 description: |-

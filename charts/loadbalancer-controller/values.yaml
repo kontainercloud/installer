@@ -7,8 +7,9 @@ fullnameOverride: ""
 
 # -------------------------------------------------------------------
 # Mode: "openstack" or "harvester"
-# In harvester mode, a kubeconfig secret is mounted; openstack-creds
-# are NOT used.
+# In harvester mode, a kubeconfig secret is mounted. The openstack-creds
+# secret is needed in BOTH modes: the controller always manages Neutron
+# ports and trunks.
 # -------------------------------------------------------------------
 mode: harvester   # openstack | harvester
 
@@ -20,7 +21,7 @@ loadbalancerController:
 
   image:
     repository: ghcr.io/kontainercloud/loadbalancer-controller
-    tag: v0.1.0-ac
+    tag: v0.2.0-ac
     pullPolicy: IfNotPresent
 
   serviceAccountName: loadbalancer-controller
@@ -40,7 +41,8 @@ loadbalancerController:
   resources: {}
 
 # -------------------------------------------------------------------
-# openstack-creds Secret (used only when mode=openstack)
+# openstack-creds Secret (used in both modes: the controller always creates
+# Neutron ports and trunks). osAuthUrl, osPassword and osProjectId are REQUIRED.
 # -------------------------------------------------------------------
 openstackCreds:
   osAuthUrl: ""
@@ -78,7 +80,7 @@ keepalivedGrpc:
 
   image:
     repository: ghcr.io/kontainercloud/keepalived
-    tag: v0.1.0-ac
+    tag: v0.2.0-ac
     pullPolicy: IfNotPresent
 
   hostNetwork: true
